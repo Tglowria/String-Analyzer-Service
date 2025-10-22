@@ -7,38 +7,51 @@ from django.utils import timezone as dj_timezone
 def sha256_hex(s: str) -> str:
     return hashlib.sha256(s.encode('utf-8')).hexdigest()
 
-def compute_properties(s: str, ignore_non_alnum_for_palindrome: bool = False) -> dict:
+def compute_properties(s: str) -> dict:
     """
-    Compute required properties:
+    Compute required properties for a string:
       - length: number of characters
-      - is_palindrome: case-insensitive (optional: ignore non-alnum)
-      - unique_characters: number of distinct characters
-      - word_count: number of whitespace-separated words
-      - sha256_hash: hex
-      - character_frequency_map: dict char -> count
+      - is_palindrome: case-insensitive
+      - unique_characters: count of distinct characters
+      - word_count: number of words separated by whitespace
+      - sha256_hash: SHA-256 hash of the string
+      - character_frequency_map: mapping each character to its occurrence count
     """
-    length = len(s)
-    # Palindrome check
-    if ignore_non_alnum_for_palindrome:
-        cleaned = re.sub(r'[^A-Za-z0-9]', '', s).lower()
-    else:
-        cleaned = s.lower()
-    is_palindrome = cleaned == cleaned[::-1]
+    try:
+        # Basic validation
+        if not isinstance(s, str):
+            raise ValueError("Input must be a string")
 
-    unique_characters = len(set(s))
-    word_count = 0 if s.strip() == "" else len(re.findall(r'\S+', s))
-    sha = sha256_hex(s)
-    freq_map = dict(Counter(s))
+        # Calculate string length
+        length = len(s)
+        
+        # Palindrome check (case-insensitive)
+        # Convert to lowercase for case-insensitive comparison
+        s_lower = s.lower()
+        is_palindrome = s_lower == s_lower[::-1]
 
-    properties = {
-        "length": length,
-        "is_palindrome": is_palindrome,
-        "unique_characters": unique_characters,
-        "word_count": word_count,
-        "sha256_hash": sha,
-        "character_frequency_map": freq_map
-    }
-    return properties
+        # Count unique characters (case-sensitive as per requirement)
+        unique_characters = len(set(s))
+        
+        # Count words (split by whitespace)
+        word_count = len(s.split()) if s.strip() else 0
+        
+        # Calculate SHA-256 hash
+        sha = hashlib.sha256(s.encode('utf-8')).hexdigest()
+        
+        # Character frequency map (case-sensitive)
+        freq_map = dict(Counter(s))
+
+        return {
+            "length": length,
+            "is_palindrome": is_palindrome,
+            "unique_characters": unique_characters,
+            "word_count": word_count,
+            "sha256_hash": sha,
+            "character_frequency_map": freq_map
+        }
+    except Exception as e:
+        raise ValueError(f"Error computing string properties: {str(e)}")
 
 # Basic natural language parser for filters
 def parse_nl_query(q: str) -> dict:
