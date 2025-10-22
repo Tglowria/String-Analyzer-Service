@@ -32,13 +32,19 @@ class StringsView(APIView):
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY
             )
 
+        # Check for empty string
+        if not value.strip():
+            return Response(
+                {"detail": "String value cannot be empty or whitespace only"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         try:
             # Compute string properties
             properties = compute_properties(value)
-            sha = properties['sha256_hash']
             
-            # Check for duplicate string
-            if AnalyzedString.objects.filter(pk=sha).exists():
+            # Check for duplicate string by value, not by hash
+            if AnalyzedString.objects.filter(value=value).exists():
                 return Response(
                     {"detail": "String already exists in the system"}, 
                     status=status.HTTP_409_CONFLICT
@@ -46,13 +52,13 @@ class StringsView(APIView):
             
             # Create new string entry
             obj = AnalyzedString.objects.create(
-                id=sha,
+                id=properties['sha256_hash'],
                 value=value,
                 properties=properties,
                 created_at=timezone.now()
             )
 
-            # Return created object
+            # Return created object with 201 Created status
             return Response(obj.to_response(), status=status.HTTP_201_CREATED)
             
         except ValueError as e:
@@ -71,73 +77,120 @@ class StringsView(APIView):
         Get All Strings with Filtering
         GET /strings?is_palindrome=true&min_length=5&max_length=20&word_count=2&contains_character=a
         """
-        qs = AnalyzedString.objects.all()
-        filters_applied = {}
-
         try:
-            # Boolean filter for palindrome
-            is_palindrome = request.query_params.get('is_palindrome')
-            if is_palindrome is not None:
-                if is_palindrome.lower() not in ('true', 'false'):
+            # Start with all strings
+            qs = list(AnalyzedString.objects.all())
+            filters_applied = {}
+
+            # Check for filters
+            filter_params = request.query_params
+
+            # Palindrome filter
+            if 'is_palindrome' in filter_params:
+                palindrome = filter_params['is_palindrome'].lower()
+                if palindrome not in ('true', 'false'):
                     return Response(
-                        {"detail": "is_palindrome must be true or false"}, 
+                        {"detail": "is_palindrome must be 'true' or 'false'"}, 
                         status=status.HTTP_400_BAD_REQUEST
                     )
-                flag = is_palindrome.lower() == 'true'
-                qs = [obj for obj in qs if obj.properties.get('is_palindrome') == flag]
-                filters_applied['is_palindrome'] = flag
+                is_palindrome = palindrome == 'true'
+                qs = [obj for obj in qs if obj.properties.get('is_palindrome') == is_palindrome]
+                filters_applied['is_palindrome'] = is_palindrome
 
-            # Integer filters
-            for param in ['min_length', 'max_length', 'word_count']:
-                value = request.query_params.get(param)
-                if value is not None:
-                    try:
-                        num = int(value)
-                        if num < 0:
-                            return Response(
-                                {"detail": f"{param} must be non-negative"}, 
-                                status=status.HTTP_400_BAD_REQUEST
-                            )
-                        if param == 'min_length':
-                            qs = [obj for obj in qs if obj.properties.get('length', 0) >= num]
-                        elif param == 'max_length':
-                            qs = [obj for obj in qs if obj.properties.get('length', 0) <= num]
-                        else:  # word_count
-                            qs = [obj for obj in qs if obj.properties.get('word_count') == num]
-                        filters_applied[param] = num
-                    except ValueError:
+            # Length filters
+            min_length = filter_params.get('min_length')
+            max_length = filter_params.get('max_length')
+            
+            if min_length is not None:
+                try:
+                    min_len = int(min_length)
+                    if min_len < 0:
                         return Response(
-                            {"detail": f"{param} must be a valid integer"}, 
+                            {"detail": "min_length must be non-negative"}, 
                             status=status.HTTP_400_BAD_REQUEST
                         )
+                    qs = [obj for obj in qs if obj.properties.get('length', 0) >= min_len]
+                    filters_applied['min_length'] = min_len
+                except ValueError:
+                    return Response(
+                        {"detail": "min_length must be a valid integer"}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
 
-            # Character filter
-            contains_character = request.query_params.get('contains_character')
-            if contains_character is not None:
-                if len(contains_character) != 1:
+            if max_length is not None:
+                try:
+                    max_len = int(max_length)
+                    if max_len < 0:
+                        return Response(
+                            {"detail": "max_length must be non-negative"}, 
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                    qs = [obj for obj in qs if obj.properties.get('length', 0) <= max_len]
+                    filters_applied['max_length'] = max_len
+                except ValueError:
+                    return Response(
+                        {"detail": "max_length must be a valid integer"}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # Check length constraints
+            if min_length is not None and max_length is not None:
+                if int(min_length) > int(max_length):
+                    return Response(
+                        {"detail": "min_length cannot be greater than max_length"}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+            # Word count filter
+            if 'word_count' in filter_params:
+                try:
+                    count = int(filter_params['word_count'])
+                    if count < 0:
+                        return Response(
+                            {"detail": "word_count must be non-negative"}, 
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                    qs = [obj for obj in qs if obj.properties.get('word_count') == count]
+                    filters_applied['word_count'] = count
+                except ValueError:
+                    return Response(
+                        {"detail": "word_count must be a valid integer"}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+            # Contains character filter
+            contains_char = filter_params.get('contains_character')
+            if contains_char is not None:
+                if not isinstance(contains_char, str) or len(contains_char) != 1:
                     return Response(
                         {"detail": "contains_character must be a single character"}, 
                         status=status.HTTP_400_BAD_REQUEST
                     )
-                qs = [obj for obj in qs if contains_character in obj.value]
-                filters_applied['contains_character'] = contains_character
-
-            # Check if min_length > max_length
-            if ('min_length' in filters_applied and 
-                'max_length' in filters_applied and 
-                filters_applied['min_length'] > filters_applied['max_length']):
-                return Response(
-                    {"detail": "min_length cannot be greater than max_length"}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
+                qs = [obj for obj in qs if contains_char in obj.value]
+                filters_applied['contains_character'] = contains_char
 
             # Prepare response
             results = [obj.to_response() for obj in qs]
-            return Response({
+
+            # Build response with metadata
+            response_data = {
                 "data": results,
                 "count": len(results),
                 "filters_applied": filters_applied
-            })
+            }
+
+            return Response(response_data)
+
+        except ValueError as e:
+            return Response(
+                {"detail": str(e)}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            return Response(
+                {"detail": f"Internal server error: {str(e)}"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
         except Exception as e:
             return Response(
@@ -161,13 +214,15 @@ class GetSpecificStringView(APIView):
             )
 
         try:
-            obj = get_object_or_404(AnalyzedString, value=string_value)
+            # Use filter().first() instead of get() to handle DoesNotExist more gracefully
+            obj = AnalyzedString.objects.filter(value=string_value).first()
+            if not obj:
+                return Response(
+                    {"detail": "String does not exist in the system"}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
             return Response(obj.to_response())
-        except AnalyzedString.DoesNotExist:
-            return Response(
-                {"detail": "String does not exist in the system"}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
+            
         except Exception as e:
             return Response(
                 {"detail": f"Internal server error: {str(e)}"}, 
@@ -186,14 +241,15 @@ class GetSpecificStringView(APIView):
             )
 
         try:
-            obj = AnalyzedString.objects.get(value=string_value)
+            obj = AnalyzedString.objects.filter(value=string_value).first()
+            if not obj:
+                return Response(
+                    {"detail": "String does not exist in the system"}, 
+                    status=status.HTTP_404_NOT_FOUND
+                )
             obj.delete()
             return Response(status=status.HTTP_204_NO_CONTENT)
-        except AnalyzedString.DoesNotExist:
-            return Response(
-                {"detail": "String does not exist in the system"}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
+            
         except Exception as e:
             return Response(
                 {"detail": f"Internal server error: {str(e)}"}, 
@@ -219,89 +275,100 @@ class NaturalLanguageFilterView(APIView):
         query = request.query_params.get('query', '').strip()
         if not query:
             return Response(
-                {"detail": "Query parameter is required and cannot be empty"}, 
+                {"detail": "Query parameter is required"}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
             # Parse natural language query
-            parsed = parse_nl_query(query)
-            if not parsed:
+            try:
+                parsed = parse_nl_query(query)
+                if not parsed:
+                    raise ValueError("Could not understand the query")
+            except ValueError as e:
                 return Response(
                     {
-                        "detail": "Could not understand the query",
+                        "detail": str(e),
                         "suggestions": [
-                            "Try using simple phrases like 'palindromes', 'strings with 5 words'",
-                            "Include specific criteria like 'length greater than 10'",
-                            "Specify character content like 'contains the letter a'"
+                            "Try using phrases like 'palindromes'",
+                            "Try 'strings with N words' where N is a number",
+                            "Try 'strings longer than N characters'",
+                            "Try 'strings containing the letter X'",
+                            "Try 'strings with word count N'"
                         ]
                     }, 
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # Validate parsed filters
-            if 'word_count' in parsed and (not isinstance(parsed['word_count'], int) or parsed['word_count'] < 0):
-                return Response(
-                    {"detail": "Invalid word count in query"}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            if 'min_length' in parsed and (not isinstance(parsed['min_length'], int) or parsed['min_length'] < 0):
-                return Response(
-                    {"detail": "Invalid minimum length in query"}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            if 'max_length' in parsed and (not isinstance(parsed['max_length'], int) or parsed['max_length'] < 0):
-                return Response(
-                    {"detail": "Invalid maximum length in query"}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            if 'min_length' in parsed and 'max_length' in parsed and parsed['min_length'] > parsed['max_length']:
-                return Response(
-                    {"detail": "Minimum length cannot be greater than maximum length"}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            if 'contains_character' in parsed and len(parsed['contains_character']) != 1:
-                return Response(
-                    {"detail": "Character filter must be a single character"}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            # Apply filters
-            qs = AnalyzedString.objects.all()
+            # Convert queryset to list for in-memory filtering
+            qs = list(AnalyzedString.objects.all())
             
+            # Apply filters
             if 'is_palindrome' in parsed:
                 qs = [obj for obj in qs if obj.properties.get('is_palindrome') == parsed['is_palindrome']]
+            
             if 'word_count' in parsed:
+                if not isinstance(parsed['word_count'], int) or parsed['word_count'] < 0:
+                    return Response(
+                        {"detail": "Invalid word count value"}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
                 qs = [obj for obj in qs if obj.properties.get('word_count') == parsed['word_count']]
+            
             if 'min_length' in parsed:
+                if not isinstance(parsed['min_length'], int) or parsed['min_length'] < 0:
+                    return Response(
+                        {"detail": "Invalid minimum length value"}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
                 qs = [obj for obj in qs if obj.properties.get('length', 0) >= parsed['min_length']]
+            
             if 'max_length' in parsed:
+                if not isinstance(parsed['max_length'], int) or parsed['max_length'] < 0:
+                    return Response(
+                        {"detail": "Invalid maximum length value"}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
                 qs = [obj for obj in qs if obj.properties.get('length', 0) <= parsed['max_length']]
+                
             if 'contains_character' in parsed:
+                if not isinstance(parsed['contains_character'], str) or len(parsed['contains_character']) != 1:
+                    return Response(
+                        {"detail": "Character filter must be a single character"}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
                 qs = [obj for obj in qs if parsed['contains_character'] in obj.value]
 
+            # Length constraint validation
+            if 'min_length' in parsed and 'max_length' in parsed:
+                if parsed['min_length'] > parsed['max_length']:
+                    return Response(
+                        {"detail": "Minimum length cannot be greater than maximum length"}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+            # Convert matching objects to response format
             results = [obj.to_response() for obj in qs]
             
-            return Response({
+            # Build response with metadata
+            response_data = {
                 "data": results,
                 "count": len(results),
                 "interpreted_query": {
                     "original": query,
-                    "parsed_filters": parsed,
-                    "applied_criteria": {
-                        key: value for key, value in parsed.items() 
-                        if key in ['is_palindrome', 'word_count', 'min_length', 'max_length', 'contains_character']
-                    }
+                    "understood_filters": parsed
                 }
-            })
+            }
+
+            return Response(response_data)
 
         except ValueError as e:
             return Response(
-                {"detail": f"Invalid query parameter: {str(e)}"}, 
+                {"detail": str(e)}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
         except Exception as e:
             return Response(
-                {"detail": f"Error processing query: {str(e)}"}, 
+                {"detail": str(e)}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )

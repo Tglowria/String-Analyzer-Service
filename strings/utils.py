@@ -18,38 +18,50 @@ def compute_properties(s: str) -> dict:
       - character_frequency_map: mapping each character to its occurrence count
     """
     try:
-        # Basic validation
+        # Input validation
         if not isinstance(s, str):
             raise ValueError("Input must be a string")
+            
+        if not s.strip():
+            raise ValueError("Input string cannot be empty or whitespace only")
 
-        # Calculate string length
-        length = len(s)
+        # Calculate string properties
+        length = len(s)  # raw length including whitespace
+        words = [w for w in s.split() if w]  # split and filter out empty strings
+        word_count = len(words)
         
-        # Palindrome check (case-insensitive)
-        # Convert to lowercase for case-insensitive comparison
-        s_lower = s.lower()
-        is_palindrome = s_lower == s_lower[::-1]
-
-        # Count unique characters (case-sensitive as per requirement)
-        unique_characters = len(set(s))
+        # Case-insensitive palindrome check
+        # Remove spaces and convert to lowercase
+        stripped = ''.join(s.lower().split())
+        is_palindrome = stripped == stripped[::-1]
         
-        # Count words (split by whitespace)
-        word_count = len(s.split()) if s.strip() else 0
-        
-        # Calculate SHA-256 hash
-        sha = hashlib.sha256(s.encode('utf-8')).hexdigest()
+        # Get unique characters (case-sensitive)
+        unique_chars = sorted(set(s))
+        unique_count = len(unique_chars)
         
         # Character frequency map (case-sensitive)
-        freq_map = dict(Counter(s))
+        freq_map = {}
+        for char in s:
+            if char in freq_map:
+                freq_map[char] += 1
+            else:
+                freq_map[char] = 1
+        
+        # Calculate SHA-256 hash of original string
+        sha256_hash = hashlib.sha256(s.encode('utf-8')).hexdigest()
 
-        return {
+        # Construct final properties dict
+        properties = {
             "length": length,
             "is_palindrome": is_palindrome,
-            "unique_characters": unique_characters,
+            "unique_characters": unique_count,
             "word_count": word_count,
-            "sha256_hash": sha,
+            "sha256_hash": sha256_hash,
             "character_frequency_map": freq_map
         }
+
+        return properties
+        
     except Exception as e:
         raise ValueError(f"Error computing string properties: {str(e)}")
 
