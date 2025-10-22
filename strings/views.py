@@ -10,15 +10,17 @@ from .utils import compute_properties, sha256_hex, parse_nl_query
 from django.utils import timezone
 from django.db.models import Q
 
-class CreateStringView(APIView):
+class StringsView(APIView):
     def post(self, request):
-        serializer = CreateStringSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({"detail": "Invalid request body or missing 'value' field"}, status=status.HTTP_400_BAD_REQUEST)
-
-        value = serializer.validated_data['value']
+        # Check if 'value' field exists
+        if 'value' not in request.data:
+            return Response({"detail": "Missing 'value' field"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        value = request.data['value']
+        
+        # Check if value is a string
         if not isinstance(value, str):
-            return Response({"detail": "'value' must be a string"}, status=422)
+            return Response({"detail": "'value' must be a string"}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
         sha = sha256_hex(value)
         if AnalyzedString.objects.filter(pk=sha).exists():
@@ -52,7 +54,6 @@ class DeleteStringView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-class ListStringsView(APIView):
     def get(self, request):
         qs = AnalyzedString.objects.all()
 
@@ -110,6 +111,9 @@ class ListStringsView(APIView):
             "count": count,
             "filters_applied": filters_applied
         })
+
+
+
 
 
 class NaturalLanguageFilterView(APIView):
