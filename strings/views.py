@@ -2,39 +2,45 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from django.shortcuts import get_object_or_404
-
-from .models import AnalyzedString
-from .serializers import CreateStringSerializer, AnalyzedStringSerializer
-from .utils import compute_properties, sha256_hex, parse_nl_query
-
 from django.utils import timezone
 from django.db.models import Q
 
+from .models import AnalyzedString
+from .utils import compute_properties, parse_nl_query
+
 class StringsView(APIView):
+    """Handle POST /strings (create) and GET /strings (list/filter)"""
+    
     def post(self, request):
-        # Check if 'value' field exists
+        """Create a new analyzed string"""
         if 'value' not in request.data:
             return Response({"detail": "Missing 'value' field"}, status=status.HTTP_400_BAD_REQUEST)
         
         value = request.data['value']
         
-        # Check if value is a string
         if not isinstance(value, str):
             return Response({"detail": "'value' must be a string"}, status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
-        sha = sha256_hex(value)
+        # Calculate properties first to avoid DB write if there's an error
+        try:
+            properties = compute_properties(value)
+            sha = properties['sha256_hash']  # Get hash from properties
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
         if AnalyzedString.objects.filter(pk=sha).exists():
             return Response({"detail": "String already exists"}, status=status.HTTP_409_CONFLICT)
 
-        properties = compute_properties(value)
-        obj = AnalyzedString.objects.create(
-            id=sha,
-            value=value,
-            properties=properties,
-            created_at=timezone.now()
-        )
-
-        return Response(obj.to_response(), status=status.HTTP_201_CREATED)
+        try:
+            obj = AnalyzedString.objects.create(
+                id=sha,
+                value=value,
+                properties=properties,
+                created_at=timezone.now()
+            )
+            return Response(obj.to_response(), status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class GetSpecificStringView(APIView):
