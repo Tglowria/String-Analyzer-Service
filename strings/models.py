@@ -3,24 +3,20 @@ from django.utils import timezone
 
 class AnalyzedString(models.Model):
     """
-    id: sha256 hash (hex) of the string (primary key)
-    value: the original string
-    properties: JSON containing computed properties
-    created_at: UTC timestamp when saved
+    Model for storing analyzed strings and their properties.
     """
-    id = models.CharField(max_length=64, primary_key=True)  # sha256 hex
-    value = models.TextField()
+    id = models.AutoField(primary_key=True)
+    value = models.TextField(unique=True)
     properties = models.JSONField()
     created_at = models.DateTimeField(default=timezone.now)
 
     def to_response(self):
-        # Return dictionary in the exact shape required by spec
+        """Convert model instance to API response format"""
         return {
-            "id": self.id,
             "value": self.value,
             "properties": self.properties,
-            "created_at": self.created_at.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+            "created_at": self.created_at.replace(microsecond=0).isoformat() + "Z"
         }
 
     def __str__(self):
-        return f"{self.id} - {self.value[:50]}"
+        return f"{self.value[:50]}"

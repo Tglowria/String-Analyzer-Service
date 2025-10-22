@@ -65,73 +65,85 @@ def compute_properties(s: str) -> dict:
     except Exception as e:
         raise ValueError(f"Error computing string properties: {str(e)}")
 
-# Basic natural language parser for filters
 def parse_nl_query(q: str) -> dict:
-    """
-    Returns dict of parsed filters or raises ValueError on unparseable queries.
-    Supports these heuristics:
-      - "single word" -> word_count = 1
-      - "palindrom" -> is_palindrome = True
-      - "strings longer than N characters" -> min_length = N+1
-      - "longer than N characters" or "longer than N" -> min_length = N+1
-      - "strings containing the letter x" -> contains_character = x
-      - "strings containing the letter z" or "contain letter z"
-      - "strings with word count N" -> word_count = N
-    """
+    """Parse natural language query into filter parameters."""
     if not q or not q.strip():
         raise ValueError("Empty query")
 
-    q_lower = q.lower()
+    q_lower = q.lower().strip()
     filters = {}
-
-    # single word
-    if re.search(r'\bsingle word\b', q_lower):
-        filters['word_count'] = 1
-
-    # palindrome
-    if 'palindrom' in q_lower:  # matches palindrome/palindromic
+    
+    # Palindrome check
+    if any(word in q_lower for word in ['palindrome', 'palindromes', 'palindromic']):
         filters['is_palindrome'] = True
+    
+    # Word count patterns
+    word_patterns = [
+        r'(\d+) words?',
+        r'word count(?: is)? (\d+)',
+        r'word count(?: of)? (\d+)',
+        r'with (\d+) words?',
+        r'that has (\d+) words?',
+        r'having (\d+) words?',
+        r'(\d+)[- ]word'
+    ]
+    
+    for pattern in word_patterns:
+        match = re.search(pattern, q_lower)
+        if match:
+            filters['word_count'] = int(match.group(1))
+            break
 
-    # longer than N characters
-    m = re.search(r'longer than (\d+)', q_lower)
-    if m:
-        n = int(m.group(1))
-        # "longer than 10 characters" means min_length = 11
-        filters['min_length'] = n + 1
+    # Length patterns
+    length_patterns = {
+        'min_length': [
+            r'longer than (\d+)(?:\s*characters?)?',
+            r'at least (\d+) characters?',
+            r'minimum (?:length|characters) (?:of )?(\d+)',
+            r'more than (\d+) characters?'
+        ],
+        'max_length': [
+            r'shorter than (\d+)(?:\s*characters?)?',
+            r'at most (\d+) characters?',
+            r'maximum (?:length|characters) (?:of )?(\d+)',
+            r'less than (\d+) characters?'
+        ]
+    }
 
-    # strings longer than N characters (the example "longer than 10 characters")
-    m2 = re.search(r'longer than (\d+)\s*characters', q_lower)
-    if m2:
-        n = int(m2.group(1))
-        filters['min_length'] = n + 1
+    for filter_key, patterns in length_patterns.items():
+        for pattern in patterns:
+            match = re.search(pattern, q_lower)
+            if match:
+                val = int(match.group(1))
+                if filter_key == 'min_length':
+                    filters[filter_key] = val + 1  # exclusive
+                else:
+                    filters[filter_key] = val - 1  # exclusive
+                break
 
-    # contains letter x / containing the letter x
-    m3 = re.search(r'contain(?:s|ing)?(?: the)? letter (\w)', q_lower)
-    if m3:
-        filters['contains_character'] = m3.group(1)
+    # Character containment
+    char_patterns = [
+        r'containing (?:the )?(?:letter )?["\']?(\w)["\']?',
+        r'with (?:the )?(?:letter )?["\']?(\w)["\']?',
+        r'has (?:the )?(?:letter )?["\']?(\w)["\']?',
+        r'contains (?:the )?(?:letter )?["\']?(\w)["\']?',
+        r'including (?:the )?(?:letter )?["\']?(\w)["\']?'
+    ]
+    
+    for pattern in char_patterns:
+        match = re.search(pattern, q_lower)
+        if match:
+            filters['contains_character'] = match.group(1)
+            break
 
-    # containing the letter x (alternative phrasing)
-    m4 = re.search(r'containing the letter (\w)', q_lower)
-    if m4:
-        filters['contains_character'] = m4.group(1)
-
-    # strings containing the letter z
-    m5 = re.search(r'containing the letter (\w)', q_lower)
-    if m5:
-        filters['contains_character'] = m5.group(1)
-
-    # exactly "strings containing the letter z"
-    m6 = re.search(r'containing the letter (\w)', q_lower)
-    if m6:
-        filters['contains_character'] = m6.group(1)
-
-    # word count N
-    m7 = re.search(r'word count(?: of)? (\d+)', q_lower)
-    if m7:
-        filters['word_count'] = int(m7.group(1))
-
-    # fallback: if no filters parsed, raise
     if not filters:
-        raise ValueError("Unable to parse natural language query")
+        suggestions = [
+            "palindrome strings",
+            "strings with 3 words",
+            "strings longer than 5 characters",
+            "strings containing the letter a",
+            "strings with word count 2"
+        ]
+        raise ValueError(f"Could not understand the query. Try phrases like: {', '.join(suggestions)}")
 
     return filters

@@ -16,43 +16,51 @@ class StringsView(APIView):
         POST /strings
         Request Body: {"value": "string to analyze"}
         """
-        # Check for missing value field
+        if not isinstance(request.data, dict):
+            return Response(
+                {"detail": "Request body must be a JSON object"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         if 'value' not in request.data:
             return Response(
-                {"detail": "Missing 'value' field"},
+                {"detail": "Request body must contain 'value' field"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        value = request.data.get('value')
+        value = request.data['value']
         
-        # Validate value type
         if not isinstance(value, str):
             return Response(
-                {"detail": "Invalid data type for 'value' (must be string)"}, 
+                {"detail": "Value must be a string"},
                 status=status.HTTP_422_UNPROCESSABLE_ENTITY
             )
-
-        # Check for empty string
+        
         if not value.strip():
             return Response(
-                {"detail": "String value cannot be empty or whitespace only"}, 
+                {"detail": "Value cannot be empty or whitespace only"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
-            # Compute string properties
-            properties = compute_properties(value)
-            
-            # Check for duplicate string by value, not by hash
+            # Check for duplicate first to avoid unnecessary computation
             if AnalyzedString.objects.filter(value=value).exists():
                 return Response(
-                    {"detail": "String already exists in the system"}, 
+                    {"detail": "String already exists"},
                     status=status.HTTP_409_CONFLICT
                 )
-            
+
+            # Compute properties after duplicate check
+            try:
+                properties = compute_properties(value)
+            except ValueError as e:
+                return Response(
+                    {"detail": str(e)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             # Create new string entry
             obj = AnalyzedString.objects.create(
-                id=properties['sha256_hash'],
                 value=value,
                 properties=properties,
                 created_at=timezone.now()
@@ -207,25 +215,26 @@ class GetSpecificStringView(APIView):
         Get Specific String
         GET /strings/{string_value}
         """
-        if not string_value:
+        if not string_value or not string_value.strip():
             return Response(
                 {"detail": "String value is required"}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Using get_object_or_404 to properly handle 404s
         try:
-            # Use filter().first() instead of get() to handle DoesNotExist more gracefully
             obj = AnalyzedString.objects.filter(value=string_value).first()
             if not obj:
                 return Response(
-                    {"detail": "String does not exist in the system"}, 
+                    {"detail": "String not found"}, 
                     status=status.HTTP_404_NOT_FOUND
                 )
-            return Response(obj.to_response())
+            
+            return Response(obj.to_response(), status=status.HTTP_200_OK)
             
         except Exception as e:
             return Response(
-                {"detail": f"Internal server error: {str(e)}"}, 
+                {"detail": f"Error retrieving string: {str(e)}"}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
